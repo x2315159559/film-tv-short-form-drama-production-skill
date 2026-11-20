@@ -1,0 +1,4 @@
+interface:
+  display_name: "短剧视频分镜 R27.2.0"
+  short_description: "依采用稿制作独立视频提示词及位置参考图提示词，独立风格块与自然语流，常规单镜不超5秒，不补设资产"
+  default_prompt: "请使用 $script-to-storyboard，将我提供的剧本及已有资产资料转换为可逐段独立投喂的视频提示词；真实必要缺项请具体说明，不自行生成资产设定。"

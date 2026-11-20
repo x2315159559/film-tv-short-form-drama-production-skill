@@ -1,0 +1,4 @@
+interface:
+  display_name: "短剧工作总入口 R27.2.0"
+  short_description: "调度文本、分镜、三类独立资产与视频风格，按授权补齐缺项并维护跨段位置接续"
+  default_prompt: "请使用 $short-drama-storyboard，按当前任务调度所需模块；完整链路先处理剧本，资产及自主决定按我的明确授权执行。"

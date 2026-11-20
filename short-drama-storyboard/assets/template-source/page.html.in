@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>@@TITLE@@</title>
+<style>
+*{box-sizing:border-box}html{overflow-y:scroll;scrollbar-gutter:stable}body{margin:0;color:#192e38;background:#f3f6f6;font:16px/1.65 system-ui,"Microsoft YaHei",sans-serif}header{padding:1.1rem max(1rem,calc((100% - 78rem)/2));background:#193940;color:#fff}h1{font-size:1.45rem;margin:0;overflow-wrap:anywhere}h2{font-size:1.1rem;margin:0}h3{font-size:1rem;margin:0;overflow-wrap:anywhere}.tools{position:sticky;top:0;z-index:2;background:#fff;border-bottom:1px solid #c4cfd1;padding:.5rem max(1rem,calc((100% - 78rem)/2));display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}button,select,input{font:inherit;font-size:.9rem;border:1px solid #a5b8bb;border-radius:.4rem;background:#fff;color:#193940;padding:.28rem .6rem}button{cursor:pointer}button:disabled{opacity:.45;cursor:default}button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid #067f72;outline-offset:1px}#save,#copy-all{color:#fff;background:#126253;border-color:#126253}#goto{max-width:min(24rem,85vw)}#lookup{width:9rem;max-width:60vw}#status{font-size:.8rem;color:#416368;min-height:1em}main{max-width:80rem;margin:auto;padding:1rem}section{margin:0 0 1.5rem}.row{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:.45rem 0}.card{background:#fff;border:1px solid #cfdbdc;border-radius:.6rem;margin:.6rem 0;padding:.75rem 1rem;scroll-margin-top:var(--toolbar-h,8rem)}.cols{display:grid;gap:1rem;grid-template-columns:1fr 1fr}.cols>div{min-width:0}.col-label,.group-label{color:#46666a;font-weight:600}.group-label{margin:.75rem 0 .2rem}.original,.editor{font:inherit;font-size:.97rem;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}.original{padding:.6rem .75rem;background:#f4f6f6;border-radius:.4rem;margin:0}.editor{display:block;width:100%;padding:.6rem .75rem;color:#182f33;resize:none;overflow:hidden;border:1px solid #c1d0d1;border-radius:.4rem;min-height:3.6rem;background:#fff}.note{font-size:.88rem;color:#536a6d;margin:.4rem 0 0}.group-label[hidden], [hidden]{display:none!important}@media(max-width:680px){main{padding:.5rem}.tools{padding:.3rem .5rem;gap:.25rem}.card{padding:.5rem}.cols{gap:.35rem}}
+.asset-name{display:flex;gap:.4rem;align-items:baseline;flex-wrap:wrap;margin:.35rem 0}.asset-name input{flex:1;min-width:8rem;max-width:100%;box-sizing:border-box}
+</style>
+</head>
+<body data-kind="@@KIND@@">
+<header><h1></h1></header>
+<div class="tools" role="toolbar" aria-label="编辑、复制与导航">
+<button type="button" id="undo">撤销</button><button type="button" id="redo">重做</button><button type="button" id="save">保存</button>
+<button type="button" id="copy-all"></button>
+<select id="goto" aria-label="跳转到条目"><option value="">跳转到…</option></select><input id="lookup" autocomplete="off"><button id="locate" type="button">定位</button>
+<button type="button" id="top">回到顶部</button><span role="status" id="status"></span></div>
+<main id="pages"></main>
+<script id="delivery-data" type="application/json">@@PAYLOAD@@</script>
+<script>
+(() => {
+  "use strict";
+  const $ = selector => document.querySelector(selector);
+  const kind = document.body.dataset.kind;
+  const copyLabel = {script:"复制全部改后版本",video:"复制全部视频提示词",assets:"复制全部资产"};
+  const narrow = "\n\n---\n\n", broad = "\n\n" + "━".repeat(32) + "\n\n";
+  const cats = ["人设","场景","道具","人物位置图"];
+  const groups = ["单段位置图","跨段共用图"];
+  const data = JSON.parse($("#delivery-data").textContent);
+  const items = data.items;
+  const views = new Map(), earlier = [], later = [];
+  const status = message => {$("#status").textContent = message;};
+  const node = (tag, css, content) => {
+    const element = document.createElement(tag);
+    if (css) element.className = css;
+    if (content !== undefined) element.textContent = content;
+    return element;
+  };
+  const button = (css, text, action) => {
+    const control = node("button", css, text);
+    control.type = "button"; control.addEventListener("click", action); return control;
+  };
+  function titleFor(item, index) {
+    const lines = item.text.split(/\r?\n/);
+    if (kind === "video") {
+      const head = /^【段落([^】]+)】$/.exec((lines[0] || "").trim());
+      const time = /^【总时长[：:]([^】]+)】$/.exec((lines[1] || "").trim());
+      return [head ? "段落" + head[1] : lines[0] || "段号待填",time ? time[1] : ""].filter(Boolean).join(" · ");
+    }
+    if (kind === "assets") {
+      const match = /^(?:【|\[)(?:人设图|权威场景设定|道具图|位置图)[^｜|】\]]*[｜|](.+)(?:】|\])$/.exec((lines[0] || "").trim());
+      if (match) return match[1];
+      const names = (item.imageNames || []).filter(Boolean);
+      return names.length ? names.join("、") : lines[0] || "条目名称待填";
+    }
+    return "第" + (index + 1) + "节";
+  }
+  function resize(editor) {
+    editor.style.height = "1px";
+    editor.style.height = Math.ceil(editor.scrollHeight + editor.offsetHeight - editor.clientHeight) + "px";
+  }
+  function resizeAll() {
+    document.documentElement.style.setProperty("--toolbar-h", ($(".tools").offsetHeight + 12) + "px");
+    for (const view of views.values()) resize(view.editor);
+  }
+  function refresh(index) {
+    const view = views.get(index);
+    view.heading.textContent = view.option.textContent = titleFor(items[index], index);
+    resize(view.editor);
+  }
+  function controls() {
+    $("#undo").disabled = !earlier.length;
+    $("#redo").disabled = !later.length;
+  }
+  function travel(from, to, side) {
+    if (!from.length) return;
+    const change = from.pop(), view = views.get(change.index);
+    to.push(change);
+    change.field.value = change[side];
+    change.update(change[side]); controls();
+    change.field.focus({preventScroll:true});
+    view.card.scrollIntoView({block:"nearest"});
+  }
+  async function copy(text) {
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error();
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const previous = document.activeElement;
+      const proxy = node("textarea"); proxy.value = text;
+      proxy.style.cssText = "position:fixed;top:0;left:-9999px";
+      document.body.append(proxy); proxy.select();
+      let success = false;
+      try { success = document.execCommand("copy"); } finally {
+        proxy.remove(); if (previous) previous.focus({preventScroll:true});
+      }
+      if (!success) {status("未能访问剪贴板，请选中正文复制。"); return;}
+    }
+    status("已复制");
+  }
+  function collect(category) {
+    if (kind !== "assets") return items.map(item => item.text).join(kind === "script" ? "\n\n" : broad);
+    const parts = [];
+    const regular = cats.slice(0,3).filter(name => !category || category === name)
+      .flatMap(name => items.filter(item => item.category === name).map(item => item.text));
+    if (regular.length) parts.push((data.grouped && !category ? "[多次出场]\n\n" : "") + regular.join(narrow));
+    if (!category || category === "人物位置图") {
+      for (const group of groups) {
+        const bodies = items.filter(item => item.category === "人物位置图" && item.group === group).map(item => item.text);
+        if (bodies.length) parts.push("【" + group + "】\n\n" + bodies.join(narrow));
+      }
+    }
+    return parts.join(broad);
+  }
+  function bindField(field, index, setValue) {
+    let current = field.value, composing = false, start = "";
+    function update(value) {
+      current = value;
+      setValue(value);
+      refresh(index);
+    }
+    function record(before, after) {
+      if (before === after) return;
+      earlier.push({index, field, update, oldValue:before, newValue:after});
+      later.length = 0;
+      controls();
+    }
+    field.addEventListener("compositionstart",() => {composing = true; start = current;});
+    field.addEventListener("compositionend",() => {
+      composing = false; record(start,field.value); update(field.value);
+    });
+    field.addEventListener("input",() => {
+      if (!composing) record(current,field.value);
+      update(field.value);
+    });
+  }
+  function card(section, entry) {
+    const [item,index] = entry;
+    const panel = node("article","card"), row = node("div","row");
+    const heading = node("h3","item-title");
+    const option = node("option"); option.value = String(index); $("#goto").append(option);
+    const editor = node("textarea","editor"); editor.value = item.text; editor.spellcheck = false;
+    editor.setAttribute("aria-label", kind === "script" ? "改后版本" : "编辑正文");
+    const label = kind === "script" ? "复制本节" : kind === "video" ? "复制本段" : "复制本条";
+    row.append(heading,button("copy-one",label,() => copy(item.text))); panel.append(row);
+    if (kind === "assets" && item.imageNames) {
+      item.imageNames.forEach((name, nameIndex) => {
+        const line = node("label","asset-name","图名：");
+        const field = node("input");
+        field.type = "text"; field.value = name; field.spellcheck = false;
+        bindField(field,index,value => {item.imageNames[nameIndex] = value;});
+        line.append(field); panel.append(line);
+      });
+    }
+    if (kind === "script") {
+      const columns = node("div","cols");
+      for (const [caption, field] of [["原版",node("pre","original",item.original)],["改后版本",editor]]) {
+        const cell = node("div"); cell.append(node("div","col-label",caption),field); columns.append(cell);
+      }
+      panel.append(columns);
+    } else panel.append(editor);
+    if (item.note) panel.append(node("p","note",item.note));
+    section.append(panel); views.set(index,{editor,card:panel,heading,option}); refresh(index);
+    bindField(editor,index,value => {item.text = value;});
+  }
+  function go(index) {
+    const view = views.get(index); if (!view) return;
+    $("#goto").value = String(index); view.card.scrollIntoView({block:"start"});
+    view.editor.focus({preventScroll:true}); status(view.heading.textContent);
+  }
+  function locate() {
+    const query = $("#lookup").value.trim(); if (!query) return;
+    const number = /^(?:段落)?0*(\d+)$/.exec(query);
+    if (kind === "assets") {
+      const exact = items.findIndex(item => (item.imageNames || []).includes(query));
+      if (exact >= 0) {go(exact);return;}
+    }
+    for (const [index,view] of views) {
+      if (kind === "video" && number) {
+        const head = /^【段落0*(\d+)】/.exec(items[index].text);
+        if (head && Number(head[1]) === Number(number[1])) {go(index);return;}
+      } else if (view.heading.textContent.includes(query) || (items[index].imageNames || []).some(name => name.includes(query))) {go(index);return;}
+    }
+    status("没有找到匹配的条目");
+  }
+  if (kind === "assets" && items.some(item => !cats.includes(item.category) || (item.category === "人物位置图" && !groups.includes(item.group)))) {
+    $("#pages").textContent = "资产类别或位置图分组无效，请检查模板数据。"; return;
+  }
+  document.title = $("h1").textContent = data.title;
+  $("#copy-all").textContent = copyLabel[kind];
+  const entries = items.map((item,index) => [item,index]);
+  if (kind !== "assets") entries.forEach(entry => card($("#pages"),entry));
+  else {
+    if (data.grouped && items.some(item => item.category !== "人物位置图")) $("#pages").append(node("p","group-label","[多次出场]"));
+    for (const cat of cats) {
+      const subset = entries.filter(([item]) => item.category === cat); if (!subset.length) continue;
+      const section = node("section"), row = node("div","row"); $("#pages").append(section);
+      row.append(node("h2","",cat),button("copy-category","复制全部"+cat,() => copy(collect(cat)))); section.append(row);
+      if (cat === "人物位置图") {
+        for (const group of groups) {
+          const rows = subset.filter(([item]) => item.group === group); if (!rows.length) continue;
+          section.append(node("p","group-label","【"+group+"】")); rows.forEach(entry => card(section,entry));
+        }
+      } else subset.forEach(entry => card(section,entry));
+    }
+  }
+  $("#undo").onclick = () => travel(earlier,later,"oldValue");
+  $("#redo").onclick = () => travel(later,earlier,"newValue");
+  document.addEventListener("keydown",event => {
+    if (event.isComposing || !(event.ctrlKey || event.metaKey) || event.altKey || event.target === $("#lookup")) return;
+    const key = event.key.toLowerCase();
+    if (key === "z" || key === "y") {
+      event.preventDefault();
+      if (key === "y" || event.shiftKey) $("#redo").click(); else $("#undo").click();
+    }
+  });
+  $("#copy-all").onclick = () => copy(collect());
+  $("#goto").onchange = () => {if ($("#goto").value !== "") go(Number($("#goto").value));};
+  const hint = kind === "video" ? "输入段号" : kind === "assets" ? "输入资产名" : "输入节名";
+  $("#lookup").placeholder = hint; $("#lookup").setAttribute("aria-label", hint);
+  $("#lookup").onkeydown = event => {
+    if (event.key === "Enter" && !event.isComposing) {
+      event.preventDefault();
+      locate();
+    }
+  };
+  $("#locate").onclick = locate;
+  $("#top").onclick = () => {window.scrollTo(0,0);};
+  $("#save").onclick = () => {
+    const snapshot = document.documentElement.cloneNode(true);
+    snapshot.querySelector("#delivery-data").textContent = JSON.stringify(data).replace(/</g,"\\u003c");
+    snapshot.querySelector("#pages").replaceChildren();
+    snapshot.querySelector("#goto").length = 1;
+    snapshot.querySelector("#status").textContent = "";
+    const blob = new Blob(["<!doctype html>\n",snapshot.outerHTML],{type:"text/html;charset=utf-8"});
+    const url = URL.createObjectURL(blob), link = node("a");
+    link.href = url; link.download = (data.title.replace(/[\\/:*?"<>|]/g,"_") || "短剧稿件") + ".html";
+    document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url),10000);
+    status("已请求保存完整 HTML");
+  };
+  controls(); resizeAll();
+  window.addEventListener("resize",resizeAll);
+  if (document.fonts) document.fonts.ready.then(resizeAll);
+})();
+</script>
+</body>
+</html>

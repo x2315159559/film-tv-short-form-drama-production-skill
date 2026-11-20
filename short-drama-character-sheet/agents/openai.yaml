@@ -1,0 +1,6 @@
+interface:
+  display_name: "短剧人物与人群设定 R2.3.0"
+  short_description: "按授权编写个人人设展示板及人群正面全身合图提示词，统一身份与资产版本"
+  default_prompt: "请使用 $short-drama-character-sheet，依据我提供的剧本、人物资料和风格编写个人或人群设定参考图提示词。"
+policy:
+  allow_implicit_invocation: false

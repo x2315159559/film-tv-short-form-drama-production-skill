@@ -1,0 +1,6 @@
+interface:
+  display_name: "短剧权威场景设定 R25.20"
+  short_description: "按用户提供规则独立生成、续作或修订纯场景设定，仅在明确请求场景任务时调用"
+  default_prompt: "请使用 $short-drama-scene-settings，按我本次指定的剧本与现行设定生成或修订权威场景设定。"
+policy:
+  allow_implicit_invocation: false
